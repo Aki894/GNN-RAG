@@ -55,9 +55,9 @@ class Trainer_KBQA(object):
         elif model_name == 'GraftNet':
             self.model = GraftNet(self.args,  len(self.entity2id), self.num_kb_relation,
                                   self.num_word)
-        elif model_name == 'NuTrea':
-            self.model = NuTrea(self.args,  len(self.entity2id), self.num_kb_relation,
-                                  self.num_word)
+        # elif model_name == 'NuTrea':
+        #     self.model = NuTrea(self.args,  len(self.entity2id), self.num_kb_relation,
+        #                           self.num_word)
         
         if args['relation_word_emb']:
             #self.model.use_rel_texts(self.rel_texts, self.rel_texts_inv)

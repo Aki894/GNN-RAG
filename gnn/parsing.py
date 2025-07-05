@@ -79,7 +79,7 @@ def add_parse_args(parser):
     create_parser_graftnet(parser_graftnet)
 
     parser_nutrea = subparsers.add_parser("NuTrea")
-    create_parser_nutrea(parser_nutrea)
+    # create_parser_nutrea(parser_nutrea)
 
 
 def create_parser_rearev(parser):

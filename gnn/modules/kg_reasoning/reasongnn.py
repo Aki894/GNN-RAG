@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -33,6 +32,14 @@ class ReasonGNNLayer(BaseGNNLayer):
         assert self.alg == 'bfs'
         self.linear_dropout = args['linear_dropout']
         self.linear_drop = nn.Dropout(p=self.linear_dropout)
+        self.use_residual = args.get('use_residual', False)
+        self.use_node_adaptive_residual = args.get('use_node_adaptive_residual', False)
+
+        if self.use_residual or self.use_node_adaptive_residual:
+            self.res_norm = nn.LayerNorm(entity_dim)
+            if self.use_node_adaptive_residual:
+                self.node_adaptive_linear = nn.Linear(in_features=entity_dim, out_features=1)
+
         for i in range(self.num_gnn):
             self.add_module('rel_linear' + str(i), nn.Linear(in_features=entity_dim, out_features=entity_dim))
             if self.alg == 'bfs':
@@ -147,6 +154,9 @@ class ReasonGNNLayer(BaseGNNLayer):
         else :
             pos_emb, pos_emb_inv = None, None
 
+        # Store the input to the current layer for residual connection
+        h_v_l_minus_1 = self.local_entity_emb
+
         for j in range(relational_ins.size(1)):
             # we do the same procedure for existing and inverse relations
             neighbor_rep = self.reason_layer(current_dist, relational_ins[:,j,:], rel_linear, pos_emb)
@@ -160,7 +170,19 @@ class ReasonGNNLayer(BaseGNNLayer):
         
         next_local_entity_emb = torch.cat((self.local_entity_emb, neighbor_reps), dim=2)
         #print(next_local_entity_emb.size())
-        self.local_entity_emb = F.relu(e2e_linear(self.linear_drop(next_local_entity_emb)))
+        # Apply the transformation for the current layer
+        transformed_h_v = F.relu(e2e_linear(self.linear_drop(next_local_entity_emb)))
+
+        # Apply residual connection
+        if self.use_residual:
+            self.local_entity_emb = self.res_norm(h_v_l_minus_1 + transformed_h_v)
+        elif self.use_node_adaptive_residual:
+            # Node-adaptive residual connection
+            # Calculate gate for each node
+            gate = torch.sigmoid(self.node_adaptive_linear(h_v_l_minus_1))
+            self.local_entity_emb = self.res_norm(h_v_l_minus_1 + gate * transformed_h_v)
+        else:
+            self.local_entity_emb = transformed_h_v
 
         score_tp = score_func(self.linear_drop(self.local_entity_emb)).squeeze(dim=2)
         answer_mask = self.local_entity_mask
