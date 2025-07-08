@@ -307,7 +307,7 @@ class BasicDataLoader(object):
                 self.query_texts[next_id] = self.tokenizer.tokenize(sample['question'])
             else:
                 tokens =  self.tokenizer.encode_plus(text=sample['question'], max_length=self.max_query_word, \
-                    pad_to_max_length=True, return_attention_mask = False, truncation=True)
+                    padding='max_length', truncation=True, return_attention_mask = True, return_token_type_ids=True)
                 self.query_texts[next_id] = np.array(tokens['input_ids'])
 
 
@@ -416,9 +416,9 @@ class BasicDataLoader(object):
             for rel_id,words in enumerate(rel_words):
 
                 tokens =  tokenizer.encode_plus(text=' '.join(words), max_length=self.max_rel_words, \
-                    pad_to_max_length=True, return_attention_mask = False, truncation=True)
+                    padding='max_length', truncation=True, return_attention_mask = True, return_token_type_ids=True)
                 tokens_inv =  tokenizer.encode_plus(text=' '.join(words[::-1]), max_length=self.max_rel_words, \
-                    pad_to_max_length=True, return_attention_mask = False, truncation=True)
+                    padding='max_length', truncation=True, return_attention_mask = True, return_token_type_ids=True)
                 self.rel_texts[rel_id] = np.array(tokens['input_ids'])
                 self.rel_texts_inv[rel_id] = np.array(tokens_inv['input_ids'])
 

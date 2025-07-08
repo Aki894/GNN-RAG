@@ -160,3 +160,5 @@ cython_debug/
 #.idea/
 
 gnn/sentence-transformers/
+
+ref/

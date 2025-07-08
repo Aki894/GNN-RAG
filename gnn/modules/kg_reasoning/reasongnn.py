@@ -59,7 +59,6 @@ class ReasonGNNLayer(BaseGNNLayer):
         self.rel_features = rel_features
         self.rel_features_inv = rel_features_inv
         self.local_entity_emb = local_entity_emb
-        self.num_relation = self.rel_features.size(0)
         self.possible_cand = []
         self.build_matrix()
         self.query_entities = query_entities

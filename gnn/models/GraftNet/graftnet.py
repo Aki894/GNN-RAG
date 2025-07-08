@@ -30,6 +30,7 @@ class GraftNet(BaseModel):
         self.lm = args['lm']
         self.norm_rel = args['norm_rel']
         self.num_iter = self.num_layer
+        self.use_psnr_module = args.get('use_psnr_module', False)
         self.layers(args)
         self.private_module_def(args, num_entity, num_relation)
         self.to(self.device)
@@ -111,6 +112,7 @@ class GraftNet(BaseModel):
         self.query_mask = self.instruction.query_mask
         rel_features = self.get_rel_feature()
         self.local_entity_emb = self.get_ent_init(local_entity, kb_adj_mat, rel_features)
+        self.initial_local_entity_emb = self.local_entity_emb.clone().detach()
         self.curr_dist = curr_dist
         self.dist_history = []
         self.action_probs = []
@@ -123,7 +125,8 @@ class GraftNet(BaseModel):
                                    kb_fact_rel = kb_fact_rel,
                                    local_entity_emb=self.local_entity_emb,
                                    rel_features=rel_features,
-                                   query_node_emb=self.query_node_emb)
+                                   query_node_emb=self.query_node_emb,
+                                   initial_local_entity_emb=self.initial_local_entity_emb)
     
     def calc_loss_label(self, curr_dist, teacher_dist, label_valid):
         tp_loss = self.get_loss(pred_dist=curr_dist, answer_dist=teacher_dist, reduction='none')
@@ -161,7 +164,7 @@ class GraftNet(BaseModel):
         self.ent_dist = current_dist
         self.dist_history.append(self.curr_dist)
         for i in range(self.num_layer):
-            score_tp, score, self.curr_dist= self.reasoning(self.curr_dist, self.query_hidden_emb, self.query_mask, step=i, return_score=True)
+            score_tp, score, self.curr_dist= self.reasoning(self.curr_dist, self.query_hidden_emb, self.query_mask, step=i, return_score=True, graph_for_psnr=kb_adj_mat_graft)
             self.dist_history.append(score)
 
         pred_dist = self.dist_history[-1]
