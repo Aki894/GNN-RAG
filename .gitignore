@@ -162,3 +162,5 @@ cython_debug/
 gnn/sentence-transformers/
 
 ref/
+.json:Zone.Identifier/
+.Identifier/
