@@ -19,6 +19,7 @@ from dataset_load_graft import load_data_graft
 from models.ReaRev.rearev import ReaRev
 from models.NSM.nsm import NSM
 from models.GraftNet.graftnet import GraftNet
+from models.GTN.gtn import GTN
 from evaluate import Evaluator
 
 class Trainer_KBQA(object):
@@ -55,6 +56,9 @@ class Trainer_KBQA(object):
         elif model_name == 'GraftNet':
             self.model = GraftNet(self.args,  len(self.entity2id), self.num_kb_relation,
                                   self.num_word)
+        elif model_name == 'GTN':
+            self.model = GTN(self.args,  len(self.entity2id), self.num_kb_relation,
+                              self.num_word)
         # elif model_name == 'NuTrea':
         #     self.model = NuTrea(self.args,  len(self.entity2id), self.num_kb_relation,
         #                           self.num_word)

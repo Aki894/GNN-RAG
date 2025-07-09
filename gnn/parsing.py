@@ -78,6 +78,9 @@ def add_parse_args(parser):
     parser_graftnet = subparsers.add_parser("GraftNet")
     create_parser_graftnet(parser_graftnet)
 
+    parser_gtn = subparsers.add_parser("GTN")
+    create_parser_gtn(parser_gtn)
+
     parser_nutrea = subparsers.add_parser("NuTrea")
     # create_parser_nutrea(parser_nutrea)
 
@@ -122,4 +125,22 @@ def create_parser_graftnet(parser):
     parser.add_argument('--normalized_gnn', default=False, type=bool_flag)
     parser.add_argument('--data_eff', action='store_true')
     #parser.add_argument('--use_self_loop', default=True, type=bool_flag)
+    add_shared_args(parser)
+
+def create_parser_gtn(parser):
+    parser.add_argument('--model_name', default='GTN', type=str, choices=['GTN'])
+    parser.add_argument('--num_iter', default=3, type=int)
+    parser.add_argument('--num_ins', default=2, type=int)
+    parser.add_argument('--num_gnn', default=3, type=int)
+    parser.add_argument('--num_heads', default=8, type=int)
+    parser.add_argument('--num_gtn_layers', default=2, type=int)
+    parser.add_argument('--d_ff', default=None, type=int)
+    parser.add_argument('--gtn_dropout', default=0.1, type=float)
+    parser.add_argument('--loss_type', default='kl', type=str)
+    parser.add_argument('--use_self_loop', default=True, type=bool_flag)
+    parser.add_argument('--use_inverse_relation', action='store_true')
+    parser.add_argument('--norm_rel', action='store_true')
+    parser.add_argument('--normalized_gnn', default=False, type=bool_flag)
+    parser.add_argument('--data_eff', action='store_true')
+    parser.add_argument('--alg', default='bfs', type=str)
     add_shared_args(parser)
