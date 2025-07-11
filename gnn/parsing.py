@@ -78,9 +78,6 @@ def add_parse_args(parser):
     parser_graftnet = subparsers.add_parser("GraftNet")
     create_parser_graftnet(parser_graftnet)
 
-    parser_gtn = subparsers.add_parser("GTN")
-    create_parser_gtn(parser_gtn)
-
     parser_nutrea = subparsers.add_parser("NuTrea")
     # create_parser_nutrea(parser_nutrea)
 
@@ -98,6 +95,15 @@ def create_parser_rearev(parser):
     parser.add_argument('--norm_rel', action='store_true')
     parser.add_argument('--data_eff', action='store_true')
     parser.add_argument('--pos_emb', action='store_true')
+    
+    # GTN相关参数
+    parser.add_argument('--use_gtn', default=True, type=bool_flag, help='是否启用GTN')
+    parser.add_argument('--gtn_channels', default=2, type=int, help='GTN元路径通道数')
+    parser.add_argument('--gtn_layers', default=1, type=int, help='GTN层数')
+    parser.add_argument('--use_hybrid_reasoning', default=True, type=bool_flag, help='是否使用混合图谱推理')
+    parser.add_argument('--use_residual', default=False, type=bool_flag, help='是否使用残差连接')
+    parser.add_argument('--use_node_adaptive_residual', default=False, type=bool_flag, help='是否使用节点自适应残差连接')
+    
     add_shared_args(parser)
 
 
@@ -127,20 +133,7 @@ def create_parser_graftnet(parser):
     #parser.add_argument('--use_self_loop', default=True, type=bool_flag)
     add_shared_args(parser)
 
-def create_parser_gtn(parser):
-    parser.add_argument('--model_name', default='GTN', type=str, choices=['GTN'])
-    parser.add_argument('--num_iter', default=3, type=int)
-    parser.add_argument('--num_ins', default=2, type=int)
-    parser.add_argument('--num_gnn', default=3, type=int)
-    parser.add_argument('--num_heads', default=8, type=int)
-    parser.add_argument('--num_gtn_layers', default=2, type=int)
-    parser.add_argument('--d_ff', default=None, type=int)
-    parser.add_argument('--gtn_dropout', default=0.1, type=float)
-    parser.add_argument('--loss_type', default='kl', type=str)
-    parser.add_argument('--use_self_loop', default=True, type=bool_flag)
-    parser.add_argument('--use_inverse_relation', action='store_true')
-    parser.add_argument('--norm_rel', action='store_true')
-    parser.add_argument('--normalized_gnn', default=False, type=bool_flag)
-    parser.add_argument('--data_eff', action='store_true')
-    parser.add_argument('--alg', default='bfs', type=str)
-    add_shared_args(parser)
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    add_parse_args(parser)
+    return parser.parse_args(args)

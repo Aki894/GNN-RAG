@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from models.base_model import BaseModel
 from modules.kg_reasoning.reasongnn import ReasonGNNLayer
+from modules.kg_reasoning.gtn_reasoner import GTNReasonLayer
 from modules.question_encoding.lstm_encoder import LSTMInstruction
 from modules.question_encoding.bert_encoder import BERTInstruction
 from modules.layer_init import TypeLayer
@@ -35,6 +36,9 @@ class ReaRev(BaseModel):
         self.alg = args['alg']
         assert self.alg == 'bfs'
         self.lm = args['lm']
+        
+        # 是否使用GTN
+        self.use_gtn = args.get('use_gtn', True)
         
         self.private_module_def(args, num_entity, num_relation)
 
@@ -119,7 +123,13 @@ class ReaRev(BaseModel):
         word_dim = self.word_dim
         kg_dim = self.kg_dim
         entity_dim = self.entity_dim
-        self.reasoning = ReasonGNNLayer(args, num_entity, num_relation, entity_dim, self.alg)
+        
+        # 根据参数选择使用GTNReasonLayer还是原始的ReasonGNNLayer
+        if self.use_gtn:
+            self.reasoning = GTNReasonLayer(args, num_entity, num_relation, entity_dim, self.alg)
+        else:
+            self.reasoning = ReasonGNNLayer(args, num_entity, num_relation, entity_dim, self.alg)
+            
         if args['lm'] == 'lstm':
             self.instruction = LSTMInstruction(args, self.word_embedding, self.num_word)
             self.relation_linear = nn.Linear(in_features=entity_dim, out_features=entity_dim)
@@ -144,13 +154,19 @@ class ReaRev(BaseModel):
         self.action_probs = []
         self.seed_entities = curr_dist
         
+        # 为GTNReasonLayer提供额外的query_node_emb参数
+        query_node_emb = None
+        if hasattr(self.instruction, 'relational_ins'):
+            query_node_emb = self.instruction.relational_ins
+        
         self.reasoning.init_reason( 
                                    local_entity=local_entity,
                                    kb_adj_mat=kb_adj_mat,
                                    local_entity_emb=self.local_entity_emb,
                                    rel_features=rel_features,
                                    rel_features_inv=rel_features_inv,
-                                   query_entities=query_entities)
+                                   query_entities=query_entities,
+                                   query_node_emb=query_node_emb)
 
 
     def calc_loss_label(self, curr_dist, teacher_dist, label_valid):
