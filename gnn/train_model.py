@@ -118,7 +118,41 @@ class Trainer_KBQA(object):
             self.load_ckpt(ckpt_path)
 
     def evaluate(self, data, test_batch_size=20, write_info=False):
-        return self.evaluator.evaluate(data, test_batch_size, write_info)
+        self.model.eval()
+        data.reset_batches(is_sequential=True)
+        all_f1 = []
+        all_h1 = []
+        all_em = []
+        num_epoch = math.ceil(data.num_data / test_batch_size)
+        if write_info:
+            f = open(self.args['result_dir'] + self.args['experiment_name'] + '.json', 'w')
+        for iteration in tqdm(range(num_epoch)):
+            batch = data.get_batch(iteration, test_batch_size, 0.0, test=True)
+            
+            # Unpack batch for evaluation: (candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, answer_lists, sph_tensor)
+            # model.forward for evaluation takes 9 arguments
+            candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, answer_lists, sph_tensor = batch
+
+            with torch.no_grad():
+                loss, pred, pred_dist, _ = self.model((candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, answer_lists, sph_tensor), training=False)
+            
+            for i in range(len(answer_lists)):
+                cur_ans_list = answer_lists[i]
+                cur_pred_dist = pred_dist[i]
+                p, r, f1, h1 = self.model.f1_and_hits(cur_ans_list, self.evaluator.convert_to_inner_id(cur_pred_dist, data.candidate_entities[data.sample_ids[i]]))
+                all_f1.append(f1)
+                all_h1.append(h1)
+
+                top_ent = torch.max(cur_pred_dist, 0)[1].item()
+                if top_ent in cur_ans_list:
+                    all_em.append(1.0)
+                else:
+                    all_em.append(0.0)
+                if write_info:
+                    f.write(json.dumps({'question':data.decode_text(q_input[i]), 'answers':cur_ans_list, 'predict':int(data.candidate_entities[data.sample_ids[i]][top_ent]), 'score': float(torch.max(cur_pred_dist, 0)[0].item())})+'\n')
+        if write_info:
+            f.close()
+        return np.mean(all_f1), np.mean(all_h1), np.mean(all_em)
 
     def train(self, start_epoch, end_epoch):
         # self.load_pretrain()
@@ -219,7 +253,10 @@ class Trainer_KBQA(object):
             batch = self.train_data.get_batch(iteration, self.args['batch_size'], self.args['fact_drop'])
             
             self.optim_model.zero_grad()
-            loss, _, _, tp_list = self.model(batch, training=True)
+            # Unpack batch for training: (candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor)
+            candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor = batch
+
+            loss, _, _, tp_list = self.model((candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor), training=True)
             # if tp_list is not None:
             h1_list, f1_list = tp_list
             h1_list_all.extend(h1_list)

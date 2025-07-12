@@ -30,7 +30,7 @@ def add_shared_args(parser):
     parser.add_argument('--lm_frozen', default=1, type=int)
 
     # dimensions, layers, dropout
-    parser.add_argument('--entity_dim', default=50, type=int)
+    parser.add_argument('--entity_dim', default=64, type=int)
     parser.add_argument('--kg_dim', default=100, type=int)
     parser.add_argument('--word_dim', default=300, type=int)
     parser.add_argument('--lm_dropout', default=0.3, type=float)
@@ -95,6 +95,11 @@ def create_parser_rearev(parser):
     parser.add_argument('--norm_rel', action='store_true')
     parser.add_argument('--data_eff', action='store_true')
     parser.add_argument('--pos_emb', action='store_true')
+    # Gradformer specific parameters
+    parser.add_argument('--gamma', default=0.9, type=float)
+    parser.add_argument('--slope', default=0.1, type=float)
+    parser.add_argument('--nhead', default=4, type=int) # Number of attention heads
+    parser.add_argument('--n_hop', default=4, type=int)  # For learnable hop in Gradformer
     add_shared_args(parser)
 
 

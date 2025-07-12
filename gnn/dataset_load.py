@@ -7,6 +7,7 @@ from collections import Counter
 import random
 import warnings
 import pickle
+import networkx as nx # Add this line
 warnings.filterwarnings("ignore")
 from modules.question_encoding.tokenizers import LSTMTokenizer#, BERTTokenizer
 from transformers import AutoTokenizer
@@ -601,32 +602,80 @@ class SingleDataLoader(BasicDataLoader):
         end = min(batch_size * (iteration + 1), self.num_data)
         sample_ids = self.batches[start: end]
         self.sample_ids = sample_ids
-        # true_batch_id, sample_ids, seed_dist = self.deal_multi_seed(ori_sample_ids)
-        # self.sample_ids = sample_ids
-        # self.true_sample_ids = ori_sample_ids
-        # self.batch_ids = true_batch_id
+
         true_batch_id = None
         seed_dist = self.seed_distribution[sample_ids]
         q_input = self.deal_q_type(q_type)
-        kb_adj_mats = self._build_fact_mat(sample_ids, fact_dropout=fact_dropout)
+        batch_heads, batch_rels, batch_tails, batch_ids, fact_ids, weight_list, weight_rel_list = self._build_fact_mat(sample_ids, fact_dropout=fact_dropout)
+
+        # --- Calculate SPH (Shortest Path Hops) for each subgraph in the batch ---
+        batch_sph = []
+        for i, sample_id in enumerate(sample_ids):
+            # Get local entities count for this sample
+            num_local_entities = len(self.global2local_entity_maps[sample_id])
+            
+            # Filter graph edges for the current sample
+            sample_mask = (batch_ids == i)
+            sample_heads = batch_heads[sample_mask] % self.max_local_entity # Adjust to local indices
+            sample_tails = batch_tails[sample_mask] % self.max_local_entity # Adjust to local indices
+
+            # Build graph for NetworkX
+            G = nx.Graph()
+            G.add_nodes_from(range(num_local_entities))
+            G.add_edges_from(zip(sample_heads, sample_tails))
+
+            # Calculate all-pairs shortest paths
+            shortest_paths = dict(nx.all_pairs_shortest_path_length(G))
+            
+            # Create SPH matrix for the current sample
+            sph_matrix = np.full((num_local_entities, num_local_entities), self.max_local_entity + 1, dtype=np.float32) # Initialize with a value larger than max possible hop
+            for u in range(num_local_entities):
+                for v in range(num_local_entities):
+                    if u in shortest_paths and v in shortest_paths[u]:
+                        sph_matrix[u, v] = shortest_paths[u][v]
+                    elif u == v: # Self-loop distance is 0
+                        sph_matrix[u, v] = 0.0
+            batch_sph.append(sph_matrix)
         
+        # Pad and stack SPH matrices to form a batch tensor
+        # Use max_local_entity to ensure consistent size for batching
+        max_current_local_entity = max([s.shape[0] for s in batch_sph]) if batch_sph else 0
+        
+        # Pad each sph_matrix to max_local_entity x max_local_entity
+        padded_sph_batch = []
+        for sph_mat in batch_sph:
+            pad_size = self.max_local_entity - sph_mat.shape[0]
+            if pad_size > 0:
+                # Pad with a large value to represent disconnected nodes in attention
+                padded_mat = np.pad(sph_mat, ((0, pad_size), (0, pad_size)), 'constant', constant_values=self.max_local_entity + 1)
+            else:
+                padded_mat = sph_mat
+            padded_sph_batch.append(padded_mat)
+
+        sph_tensor = torch.tensor(np.stack(padded_sph_batch), dtype=torch.float32)
+        # --- End SPH calculation ---
+
+        kb_adj_mats_tuple = (batch_heads, batch_rels, batch_tails, batch_ids, fact_ids, weight_list, weight_rel_list)
+
         if test:
             return self.candidate_entities[sample_ids], \
                    self.query_entities[sample_ids], \
-                   kb_adj_mats, \
+                   kb_adj_mats_tuple, \
                    q_input, \
                    seed_dist, \
                    true_batch_id, \
                    self.answer_dists[sample_ids], \
-                   self.answer_lists[sample_ids],\
+                   self.answer_lists[sample_ids], \
+                   sph_tensor # Add sph_tensor here for test mode
 
         return self.candidate_entities[sample_ids], \
                self.query_entities[sample_ids], \
-               kb_adj_mats, \
+               kb_adj_mats_tuple, \
                q_input, \
                seed_dist, \
                true_batch_id, \
-               self.answer_dists[sample_ids]
+               self.answer_dists[sample_ids], \
+               sph_tensor # Add sph_tensor here for train mode
 
 
 def load_dict(filename):

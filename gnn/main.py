@@ -5,6 +5,12 @@ import torch
 import numpy as np
 import os
 import time
+import sys
+
+# Add the parent directory of gnn (which is GNN-RAG) to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__))) # This adds gnn to path
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Gradformer_main'))
+
 #from Models.ReaRev.rearev import 
 from train_model import Trainer_KBQA
 from parsing import add_parse_args

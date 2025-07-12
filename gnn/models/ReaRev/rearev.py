@@ -166,7 +166,11 @@ class ReaRev(BaseModel):
         """
 
         # local_entity, query_entities, kb_adj_mat, query_text, seed_dist, answer_dist = batch
-        local_entity, query_entities, kb_adj_mat, query_text, seed_dist, true_batch_id, answer_dist = batch
+        if training:
+            local_entity, query_entities, kb_adj_mat, query_text, seed_dist, true_batch_id, answer_dist, sph_tensor = batch
+        else:
+            local_entity, query_entities, kb_adj_mat, query_text, seed_dist, true_batch_id, answer_dist, answer_lists, sph_tensor = batch
+
         local_entity = torch.from_numpy(local_entity).type('torch.LongTensor').to(self.device)
         # local_entity_mask = (local_entity != self.num_entity).float()
         query_entities = torch.from_numpy(query_entities).type('torch.FloatTensor').to(self.device)
@@ -175,6 +179,9 @@ class ReaRev(BaseModel):
         current_dist = Variable(seed_dist, requires_grad=True)
 
         q_input= torch.from_numpy(query_text).type('torch.LongTensor').to(self.device)
+        # Move sph_tensor to the correct device
+        sph_tensor = sph_tensor.to(self.device)
+        
         #query_text2 = torch.from_numpy(query_text2).type('torch.LongTensor').to(self.device)
         if self.lm != 'lstm':
             pad_val = self.instruction.pad_val #tokenizer.convert_tokens_to_ids(self.instruction.tokenizer.pad_token)
@@ -207,7 +214,8 @@ class ReaRev(BaseModel):
             relation_ins = torch.cat(self.instruction.instructions, dim=1)
             self.curr_dist = current_dist            
             for j in range(self.num_gnn):
-                self.curr_dist, global_rep = self.reasoning(self.curr_dist, relation_ins, step=j)
+                # Pass sph_tensor to reasoning layer
+                self.curr_dist, global_rep = self.reasoning(self.curr_dist, relation_ins, sph_tensor, step=j)
             self.dist_history.append(self.curr_dist)
             qs = []
 
