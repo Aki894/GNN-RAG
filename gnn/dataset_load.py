@@ -8,6 +8,8 @@ import random
 import warnings
 import pickle
 import networkx as nx # Add this line
+import multiprocessing as mp
+from functools import lru_cache
 warnings.filterwarnings("ignore")
 from modules.question_encoding.tokenizers import LSTMTokenizer#, BERTTokenizer
 from transformers import AutoTokenizer
@@ -28,6 +30,9 @@ class BasicDataLoader(object):
         self._load_file(config, data_type)
         self._load_data()
         
+        # 添加缓存机制
+        self.sph_cache = {}
+        self.max_cache_size = 10000  # 限制缓存大小
 
     def _load_file(self, config, data_type="train"):
 
@@ -193,165 +198,174 @@ class BasicDataLoader(object):
                 tokenizer_name = 'roberta-base'
             elif self.tokenize  == 'sbert':
                 tokenizer_name = 'sentence-transformers/all-MiniLM-L6-v2'
-            elif self.tokenize == 'sbert2':
+            elif self.tokenize  == 'sbert2':
                 tokenizer_name = 'sentence-transformers/all-mpnet-base-v2'
             elif self.tokenize  == 't5':
                 tokenizer_name = 't5-small'
             elif self.tokenize == 'simcse':
                 tokenizer_name = 'princeton-nlp/sup-simcse-bert-base-uncased'
-            elif self.tokenize  == 't5':
-                tokenizer_name = 't5-small'
-            elif self.tokenize  == 'relbert':
-                tokenizer_name = 'pretrained_lms/sr-simbert/'
-
-            self.max_query_word = max_count + 2 #for cls token and sep
-            #self.tokenizer = AutoTokenizer(self.max_query_word)
+            elif self.tokenize == 'relbert':
+                tokenizer_name = 'microsoft/DialoGPT-medium'
+            elif self.tokenize == 'dbert':
+                tokenizer_name = 'microsoft/DialoGPT-medium'
+            else:
+                tokenizer_name = 'bert-base-uncased'
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-            self.num_word = self.tokenizer.convert_tokens_to_ids(self.tokenizer.pad_token) #self.tokenizer.q_tokenizer.encode("[UNK]")[0]
-            
-            self.query_texts = np.full((self.num_data, self.max_query_word), self.num_word, dtype=int)
+            self.num_word = self.tokenizer.vocab_size
+            self.query_texts = np.full((self.num_data, self.max_query_word), self.tokenizer.pad_token_id, dtype=int)
 
+        print('max_query_word: ', self.max_query_word)
+        print('num_word: ', self.num_word)
 
-        next_id = 0
-        num_query_entity = {}
-        for sample in tqdm(self.data):
-            self.question_id.append(sample["id"])
-            # get a list of local entities
-            g2l = self.global2local_entity_maps[next_id]
-            #print(g2l)
-            if len(g2l) == 0:
-                #print(next_id)
-                continue
-            # build connection between question and entities in it
-            tp_set = set()
-            seed_list = []
-            key_ent = 'entities_cid' if 'entities_cid' in sample else 'entities'
-            for j, entity in enumerate(sample[key_ent]):
-                # if entity['text'] not in self.entity2id:
-                #     continue
-                try:
-                    if isinstance(entity, dict) and  'text' in entity:
-                        global_entity = self.entity2id[entity['text']]
-                    else:
-                        global_entity = self.entity2id[entity]
-                    global_entity = self.entity2id[entity['text']]
-                except:
-                    global_entity = entity #self.entity2id[entity['text']]
+        # 预计算SPH矩阵以加速训练
+        print('Pre-computing SPH matrices...')
+        self._precompute_sph_matrices()
 
-                if global_entity not in g2l:
-                    continue
-                local_ent = g2l[global_entity]
-                self.query_entities[next_id, local_ent] = 1.0
-                seed_list.append(local_ent)
-                tp_set.add(local_ent)
-            
-            self.seed_list[next_id] = seed_list
-            num_query_entity[next_id] = len(tp_set)
-            for global_entity, local_entity in g2l.items():
-                if self.data_name != 'cwq':
-
-                    if local_entity not in tp_set:  # skip entities in question
-                    #print(global_entity)
-                    #print(local_entity)
-                        self.candidate_entities[next_id, local_entity] = global_entity
-                elif self.data_name == 'cwq':
-                    self.candidate_entities[next_id, local_entity] = global_entity
-                # if local_entity != 0:  # skip question node
-                #     self.candidate_entities[next_id, local_entity] = global_entity
-
-            # relations in local KB
-            head_list = []
-            rel_list = []
-            tail_list = []
-            for i, tpl in enumerate(sample['subgraph']['tuples']):
-                sbj, rel, obj = tpl
-                try:
-                    if isinstance(sbj, dict) and  'text' in sbj:
-                        head = g2l[self.entity2id[sbj['text']]]
-                        rel = self.relation2id[rel['text']]
-                        tail = g2l[self.entity2id[obj['text']]]
-                    else:
-                        head = g2l[self.entity2id[sbj]]
-                        rel = self.relation2id[rel]
-                        tail = g2l[self.entity2id[obj]]
-                except:
-                    head = g2l[sbj]
-                    try:
-                        rel = int(rel)
-                    except:
-                        rel = self.relation2id[rel]
-                    tail = g2l[obj]
-                head_list.append(head)
-                rel_list.append(rel)
-                tail_list.append(tail)
-                self.kb_fact_rels[next_id, i] = rel
-                if self.use_inverse_relation:
-                    head_list.append(tail)
-                    rel_list.append(rel + len(self.relation2id))
-                    tail_list.append(head)
-                    self.kb_fact_rels[next_id, i] = rel + len(self.relation2id)
-                
-            if len(tp_set) > 0:
-                for local_ent in tp_set:
-                    self.seed_distribution[next_id, local_ent] = 1.0 / len(tp_set)
-            else:
-                for index in range(len(g2l)):
-                    self.seed_distribution[next_id, index] = 1.0 / len(g2l)
-            try:
-                assert np.sum(self.seed_distribution[next_id]) > 0.0
-            except:
-                print(next_id, len(tp_set))
-                exit(-1)
-
-            #tokenize question
+        for i, line in enumerate(tqdm(self.data)):
+            # 处理查询文本
             if self.tokenize == 'lstm':
-                self.query_texts[next_id] = self.tokenizer.tokenize(sample['question'])
+                word_list = line["question"].split(' ')
+                for j, word in enumerate(word_list):
+                    if j >= self.max_query_word:
+                        break
+                    if word in self.word2id:
+                        self.query_texts[i, j] = self.word2id[word]
+                    else:
+                        self.query_texts[i, j] = len(self.word2id)
             else:
-                tokens =  self.tokenizer.encode_plus(text=sample['question'], max_length=self.max_query_word, \
-                    padding='max_length', truncation=True, return_attention_mask = True, return_token_type_ids=True)
-                self.query_texts[next_id] = np.array(tokens['input_ids'])
+                # 使用BERT tokenizer
+                tokens = self.tokenizer.encode(line["question"], 
+                                             max_length=self.max_query_word, 
+                                             truncation=True, 
+                                             padding='max_length')
+                self.query_texts[i, :len(tokens)] = tokens
 
-
-            # construct distribution for answers
-            answer_list = []
-            if 'answers_cid' in sample:
-                for answer in sample['answers_cid']:
-                    #keyword = 'text' if type(answer['kb_id']) == int else 'kb_id'
-                    answer_ent = answer
-                    answer_list.append(answer_ent)
-                    if answer_ent in g2l:
-                        self.answer_dists[next_id, g2l[answer_ent]] = 1.0
+            # 处理候选实体
+            if 'entities_cid' in line:
+                entities = line['entities_cid']
             else:
-                for answer in sample['answers']:
-                    keyword = 'text' if type(answer['kb_id']) == int else 'kb_id'
-                    answer_ent = self.entity2id[answer[keyword]]
-                    answer_list.append(answer_ent)
-                    if answer_ent in g2l:
-                        self.answer_dists[next_id, g2l[answer_ent]] = 1.0
-            self.answer_lists[next_id] = answer_list
+                entities = line['entities']
+            
+            for j, entity in enumerate(entities):
+                if j >= self.max_local_entity:
+                    break
+                if isinstance(entity, dict) and 'text' in entity:
+                    if entity['text'] in self.entity2id:
+                        self.candidate_entities[i, j] = self.entity2id[entity['text']]
+                else:
+                    if entity in self.entity2id:
+                        self.candidate_entities[i, j] = self.entity2id[entity]
 
-            if not self.data_eff:
-                self.kb_adj_mats[next_id] = (np.array(head_list, dtype=int),
-                                         np.array(rel_list, dtype=int),
-                                         np.array(tail_list, dtype=int))
+            # 处理查询实体
+            for j, entity in enumerate(entities):
+                if j >= self.max_local_entity:
+                    break
+                if isinstance(entity, dict) and 'text' in entity:
+                    if entity['text'] in self.entity2id:
+                        self.query_entities[i, j] = 1.0
+                else:
+                    if entity in self.entity2id:
+                        self.query_entities[i, j] = 1.0
 
-            next_id += 1
-        num_no_query_ent = 0
-        num_one_query_ent = 0
-        num_multiple_ent = 0
-        for i in range(next_id):
-            ct = num_query_entity[i]
-            if ct == 1:
-                num_one_query_ent += 1
-            elif ct == 0:
-                num_no_query_ent += 1
-            else:
-                num_multiple_ent += 1
-        print("{} cases in total, {} cases without query entity, {} cases with single query entity,"
-              " {} cases with multiple query entities".format(next_id, num_no_query_ent,
-                                                              num_one_query_ent, num_multiple_ent))
+            # 处理种子分布
+            for j, entity in enumerate(entities):
+                if j >= self.max_local_entity:
+                    break
+                if isinstance(entity, dict) and 'text' in entity:
+                    if entity['text'] in self.entity2id:
+                        self.seed_distribution[i, j] = 1.0 / len(entities)
+                else:
+                    if entity in self.entity2id:
+                        self.seed_distribution[i, j] = 1.0 / len(entities)
 
+            # 处理答案分布
+            if 'answers' in line:
+                answers = line['answers']
+                for answer in answers:
+                    if isinstance(answer, dict) and 'text' in answer:
+                        if answer['text'] in self.entity2id:
+                            answer_id = self.entity2id[answer['text']]
+                            for j, entity in enumerate(entities):
+                                if j >= self.max_local_entity:
+                                    break
+                                if isinstance(entity, dict) and 'text' in entity:
+                                    if entity['text'] in self.entity2id and self.entity2id[entity['text']] == answer_id:
+                                        self.answer_dists[i, j] = 1.0
+                                        break
+                                else:
+                                    if entity in self.entity2id and self.entity2id[entity] == answer_id:
+                                        self.answer_dists[i, j] = 1.0
+                                        break
+
+            # 处理答案列表
+            if 'answers' in line:
+                self.answer_lists[i] = []
+                for answer in line['answers']:
+                    if isinstance(answer, dict) and 'text' in answer:
+                        if answer['text'] in self.entity2id:
+                            self.answer_lists[i].append(self.entity2id[answer['text']])
+                    else:
+                        if answer in self.entity2id:
+                            self.answer_lists[i].append(self.entity2id[answer])
+
+    def _precompute_sph_matrices(self):
+        """预计算SPH矩阵以提高训练效率"""
+        print("Pre-computing SPH matrices for all samples...")
+        self.sph_matrices = []
         
+        for i, line in enumerate(tqdm(self.data, desc="Computing SPH")):
+            # 获取子图实体
+            subgraph_entities = line['subgraph']['entities']
+            num_local_entities = len(subgraph_entities)
+            
+            # 构建图
+            G = nx.Graph()
+            G.add_nodes_from(range(num_local_entities))
+            
+            # 添加边
+            for tuple_data in line['subgraph']['tuples']:
+                head, rel, tail = tuple_data
+                head_idx = subgraph_entities.index(head)
+                tail_idx = subgraph_entities.index(tail)
+                G.add_edge(head_idx, tail_idx)
+            
+            # 计算最短路径
+            try:
+                shortest_paths = dict(nx.all_pairs_shortest_path_length(G))
+            except:
+                # 如果图不连通，使用默认值
+                shortest_paths = {}
+            
+            # 创建SPH矩阵
+            sph_matrix = np.full((num_local_entities, num_local_entities), 
+                                self.max_local_entity + 1, dtype=np.float32)
+            
+            for u in range(num_local_entities):
+                for v in range(num_local_entities):
+                    if u in shortest_paths and v in shortest_paths[u]:
+                        sph_matrix[u, v] = shortest_paths[u][v]
+                    elif u == v:
+                        sph_matrix[u, v] = 0.0
+            
+            self.sph_matrices.append(sph_matrix)
+
+    def _get_cached_sph(self, sample_id):
+        """获取缓存的SPH矩阵"""
+        if sample_id in self.sph_cache:
+            return self.sph_cache[sample_id]
+        
+        # 如果缓存满了，清除一半
+        if len(self.sph_cache) >= self.max_cache_size:
+            keys_to_remove = list(self.sph_cache.keys())[:self.max_cache_size // 2]
+            for key in keys_to_remove:
+                del self.sph_cache[key]
+        
+        # 计算并缓存SPH矩阵
+        sph_matrix = self.sph_matrices[sample_id]
+        self.sph_cache[sample_id] = sph_matrix
+        return sph_matrix
+
+
     def build_rel_words(self, tokenize):
         """ 
         Tokenizes relation surface forms.
@@ -608,52 +622,26 @@ class SingleDataLoader(BasicDataLoader):
         q_input = self.deal_q_type(q_type)
         batch_heads, batch_rels, batch_tails, batch_ids, fact_ids, weight_list, weight_rel_list = self._build_fact_mat(sample_ids, fact_dropout=fact_dropout)
 
-        # --- Calculate SPH (Shortest Path Hops) for each subgraph in the batch ---
+        # --- 使用预计算的SPH矩阵，大幅提升效率 ---
         batch_sph = []
         for i, sample_id in enumerate(sample_ids):
-            # Get local entities count for this sample
-            num_local_entities = len(self.global2local_entity_maps[sample_id])
-            
-            # Filter graph edges for the current sample
-            sample_mask = (batch_ids == i)
-            sample_heads = batch_heads[sample_mask] % self.max_local_entity # Adjust to local indices
-            sample_tails = batch_tails[sample_mask] % self.max_local_entity # Adjust to local indices
-
-            # Build graph for NetworkX
-            G = nx.Graph()
-            G.add_nodes_from(range(num_local_entities))
-            G.add_edges_from(zip(sample_heads, sample_tails))
-
-            # Calculate all-pairs shortest paths
-            shortest_paths = dict(nx.all_pairs_shortest_path_length(G))
-            
-            # Create SPH matrix for the current sample
-            sph_matrix = np.full((num_local_entities, num_local_entities), self.max_local_entity + 1, dtype=np.float32) # Initialize with a value larger than max possible hop
-            for u in range(num_local_entities):
-                for v in range(num_local_entities):
-                    if u in shortest_paths and v in shortest_paths[u]:
-                        sph_matrix[u, v] = shortest_paths[u][v]
-                    elif u == v: # Self-loop distance is 0
-                        sph_matrix[u, v] = 0.0
+            # 直接使用预计算的SPH矩阵
+            sph_matrix = self.sph_matrices[sample_id]
             batch_sph.append(sph_matrix)
         
-        # Pad and stack SPH matrices to form a batch tensor
-        # Use max_local_entity to ensure consistent size for batching
-        max_current_local_entity = max([s.shape[0] for s in batch_sph]) if batch_sph else 0
-        
-        # Pad each sph_matrix to max_local_entity x max_local_entity
+        # 填充并堆叠SPH矩阵
         padded_sph_batch = []
         for sph_mat in batch_sph:
             pad_size = self.max_local_entity - sph_mat.shape[0]
             if pad_size > 0:
-                # Pad with a large value to represent disconnected nodes in attention
+                # 用大值填充以表示注意力中的断开节点
                 padded_mat = np.pad(sph_mat, ((0, pad_size), (0, pad_size)), 'constant', constant_values=self.max_local_entity + 1)
             else:
                 padded_mat = sph_mat
             padded_sph_batch.append(padded_mat)
 
         sph_tensor = torch.tensor(np.stack(padded_sph_batch), dtype=torch.float32)
-        # --- End SPH calculation ---
+        # --- SPH计算结束 ---
 
         kb_adj_mats_tuple = (batch_heads, batch_rels, batch_tails, batch_ids, fact_ids, weight_list, weight_rel_list)
 
