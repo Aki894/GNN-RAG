@@ -7,7 +7,6 @@ import os, math
 import torch
 from torch.optim.lr_scheduler import ExponentialLR
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
 
 from tqdm import tqdm
 tqdm.monitor_iterval = 0
@@ -38,14 +37,6 @@ class Trainer_KBQA(object):
         self.test_batch_size = args['test_batch_size']
         self.device = torch.device('cuda' if args['use_cuda'] else 'cpu')
         self.reset_time = 0
-        
-        # 启用混合精度训练
-        self.use_amp = args.get('use_amp', True)
-        if self.use_amp and torch.cuda.is_available():
-            self.scaler = GradScaler()
-        else:
-            self.scaler = None
-            
         self.load_data(args, args['lm'])
         
 
@@ -266,60 +257,23 @@ class Trainer_KBQA(object):
         num_epoch = math.ceil(self.train_data.num_data / self.args['batch_size'])
         h1_list_all = []
         f1_list_all = []
-        
-        # 优化批处理大小以提高GPU利用率
-        batch_size = self.args['batch_size']
-        if torch.cuda.is_available():
-            # 根据GPU内存动态调整批处理大小
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
-            if gpu_memory >= 24:  # 24GB+ GPU
-                batch_size = min(batch_size * 2, 64)
-            elif gpu_memory >= 16:  # 16GB+ GPU
-                batch_size = min(batch_size * 1.5, 48)
-            elif gpu_memory >= 8:  # 8GB+ GPU
-                batch_size = min(batch_size * 1.2, 32)
-        
-        print(f"Using batch size: {batch_size}")
-        
         for iteration in tqdm(range(num_epoch)):
-            # 动态调整批处理大小
-            current_batch_size = min(batch_size, self.args['batch_size'])
-            
-            batch = self.train_data.get_batch(iteration, current_batch_size, self.args['fact_drop'])
+            batch = self.train_data.get_batch(iteration, self.args['batch_size'], self.args['fact_drop'])
             
             self.optim_model.zero_grad()
             # Unpack batch for training: (candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor)
             candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor = batch
 
-            # 使用混合精度训练
-            if self.use_amp and self.scaler is not None:
-                with autocast():
-                    loss, _, _, tp_list = self.model((candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor), training=True)
-                
-                # 使用scaler进行反向传播
-                self.scaler.scale(loss).backward()
-                self.scaler.unscale_(self.optim_model)
-                torch.nn.utils.clip_grad_norm_([param for name, param in self.model.named_parameters()],
-                                               self.args['gradient_clip'])
-                self.scaler.step(self.optim_model)
-                self.scaler.update()
-            else:
-                loss, _, _, tp_list = self.model((candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor), training=True)
-                # if tp_list is not None:
-                h1_list, f1_list = tp_list
-                h1_list_all.extend(h1_list)
-                f1_list_all.extend(f1_list)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_([param for name, param in self.model.named_parameters()],
-                                               self.args['gradient_clip'])
-                self.optim_model.step()
-            
+            loss, _, _, tp_list = self.model((candidate_entities, query_entities, kb_adj_mats_tuple, q_input, seed_dist, true_batch_id, answer_dists, sph_tensor), training=True)
+            # if tp_list is not None:
+            h1_list, f1_list = tp_list
+            h1_list_all.extend(h1_list)
+            f1_list_all.extend(f1_list)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_([param for name, param in self.model.named_parameters()],
+                                           self.args['gradient_clip'])
+            self.optim_model.step()
             losses.append(loss.item())
-            
-            # 定期清理GPU缓存
-            if iteration % 10 == 0 and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                
         extras = [0, 0]
         return np.mean(losses), extras, h1_list_all, f1_list_all
 

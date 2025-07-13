@@ -1,7 +1,7 @@
 
 ###ReaRev+SBERT training
 python main.py ReaRev --entity_dim 64 --num_epoch 100 --batch_size 8 --eval_every 2  \
---lm relbert --num_iter 2 --num_ins 3 --num_gnn 3  --name webqsp \
+--lm sbert --num_iter 2 --num_ins 3 --num_gnn 3  --name webqsp \
 --experiment_name webqsp-rearev-relbert-res-psnr --data_folder data/webqsp/ --warmup_epoch 80
 # --is_eval --load_experiment relbert-webqsp-rearev-final.ckpt 
 

@@ -41,7 +41,7 @@ def add_shared_args(parser):
     parser.add_argument('--warmup_epoch', default=0, type=int)
     parser.add_argument('--fact_scale', default=3, type=int)
     parser.add_argument('--eval_every', default=2, type=int)
-    parser.add_argument('--batch_size', default=32, type=int)  # 增加默认批处理大小
+    parser.add_argument('--batch_size', default=20, type=int)
     parser.add_argument('--gradient_clip', default=1.0, type=float)
     parser.add_argument('--lr', default=0.0005, type=float)
     parser.add_argument('--decay_rate', default=0.0, type=float)
@@ -49,8 +49,6 @@ def add_shared_args(parser):
     parser.add_argument('--lr_schedule', action='store_true')
     parser.add_argument('--label_smooth', default=0.1, type=float)
     parser.add_argument('--fact_drop', default=0, type=float)
-    parser.add_argument('--use_amp', default=True, type=bool_flag)  # 启用混合精度训练
-    parser.add_argument('--num_workers', default=4, type=int)  # 数据加载并行度
     #parser.add_argument('--encode_type', action='store_true')
 
     # model options
